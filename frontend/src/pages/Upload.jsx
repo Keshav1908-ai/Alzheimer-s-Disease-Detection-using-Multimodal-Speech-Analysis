@@ -13,6 +13,7 @@ const Upload = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState(null);
+  const [recordingMeta, setRecordingMeta] = useState({ ext: 'webm', mime: 'audio/webm' });
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioURL, setAudioURL] = useState(null);
 
@@ -81,10 +82,8 @@ const Upload = () => {
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        // Store both blob and file extension for later use
-        audioBlob.fileExtension = fileExtension;
-        audioBlob.mimeType = mimeType;
         setRecordedBlob(audioBlob);
+        setRecordingMeta({ ext: fileExtension, mime: mimeType });
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
 
@@ -136,6 +135,7 @@ const Upload = () => {
 
   const resetRecording = () => {
     setRecordedBlob(null);
+    setRecordingMeta({ ext: 'webm', mime: 'audio/webm' });
     setRecordingTime(0);
     if (audioURL) {
       URL.revokeObjectURL(audioURL);
@@ -150,10 +150,8 @@ const Upload = () => {
     // If in record mode, convert blob to file
     if (mode === 'record' && recordedBlob) {
       const timestamp = Date.now();
-      const extension = recordedBlob.fileExtension || 'webm';
-      const mimeType = recordedBlob.mimeType || 'audio/webm';
-      fileToUpload = new File([recordedBlob], `recording_${timestamp}.${extension}`, {
-        type: mimeType,
+      fileToUpload = new File([recordedBlob], `recording_${timestamp}.${recordingMeta.ext}`, {
+        type: recordingMeta.mime,
       });
     }
 

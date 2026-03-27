@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import time
+import subprocess
 from werkzeug.utils import secure_filename
 
 # Import services
@@ -19,11 +20,19 @@ CORS(app)
 # Configuration
 UPLOAD_FOLDER = 'data/audio'
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'flac', 'webm', 'mp4', 'm4a'}
+NEEDS_CONVERSION = {'webm', 'mp4', 'm4a'}  # Formats that librosa can't natively load
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Get ffmpeg path from imageio-ffmpeg (bundled binary)
+try:
+    import imageio_ffmpeg
+    FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+except ImportError:
+    FFMPEG_PATH = 'ffmpeg'  # Fallback to system ffmpeg
 
 # Initialize services
 db_service = DatabaseService()
@@ -33,9 +42,66 @@ nlp_service = NLPService()
 model_service = ModelService()
 prediction_service = PredictionService(model_service)
 
+ALLOWED_MIMETYPES = {
+    'audio/wav', 'audio/wave', 'audio/x-wav',
+    'audio/mp3', 'audio/mpeg',
+    'audio/ogg', 'audio/vorbis',
+    'audio/flac', 'audio/x-flac',
+    'audio/webm',
+    'audio/mp4', 'audio/x-m4a', 'audio/aac',
+}
+
 def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def allowed_audio(file):
+    """Check if the uploaded file is an allowed audio file (by extension or MIME type)"""
+    # Check by file extension first
+    if allowed_file(file.filename):
+        return True
+    # Fallback: check by MIME content type (handles browser recordings)
+    content_type = (file.content_type or '').split(';')[0].strip().lower()
+    return content_type in ALLOWED_MIMETYPES
+
+def get_file_extension(file):
+    """Get or infer the file extension for an uploaded file"""
+    if '.' in file.filename:
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        if ext in ALLOWED_EXTENSIONS:
+            return ext
+    # Infer from MIME type
+    content_type = (file.content_type or '').split(';')[0].strip().lower()
+    mime_to_ext = {
+        'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'mp4',
+        'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav',
+        'audio/wave': 'wav', 'audio/x-wav': 'wav', 'audio/flac': 'flac',
+        'audio/x-flac': 'flac', 'audio/x-m4a': 'm4a', 'audio/aac': 'm4a',
+    }
+    return mime_to_ext.get(content_type, 'webm')
+
+def convert_to_wav(filepath):
+    """Convert non-standard audio formats (webm, mp4, m4a) to WAV using ffmpeg"""
+    ext = filepath.rsplit('.', 1)[1].lower()
+    if ext not in NEEDS_CONVERSION:
+        return filepath  # No conversion needed
+
+    wav_path = filepath.rsplit('.', 1)[0] + '.wav'
+    try:
+        result = subprocess.run(
+            [FFMPEG_PATH, '-i', filepath, '-ar', '22050', '-ac', '1', '-y', wav_path],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and os.path.exists(wav_path):
+            # Remove original file to save space
+            os.remove(filepath)
+            return wav_path
+        else:
+            print(f"FFmpeg conversion failed: {result.stderr}")
+            return filepath  # Return original if conversion fails
+    except Exception as e:
+        print(f"Error converting audio: {e}")
+        return filepath
 
 # ============= API Routes =============
 
@@ -61,15 +127,27 @@ def upload_audio():
         if file.filename == '':
             return jsonify({'success': False, 'error': 'No file selected'}), 400
 
-        if not allowed_file(file.filename):
+        print(f"[UPLOAD] Received: filename='{file.filename}', content_type='{file.content_type}'")
+
+        if not allowed_audio(file):
+            print(f"[UPLOAD] Rejected: not a recognized audio file")
             return jsonify({'success': False, 'error': 'Invalid file type'}), 400
 
-        # Save file
+        # Save file with correct extension
         filename = secure_filename(file.filename)
+        ext = get_file_extension(file)
         timestamp = int(time.time())
-        filename = f"{timestamp}_{filename}"
+        # Ensure the filename has the correct extension
+        if not filename or not '.' in filename:
+            filename = f"recording_{timestamp}.{ext}"
+        else:
+            filename = f"{timestamp}_{filename}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
+
+        # Convert browser-recorded formats (webm, mp4, m4a) to WAV
+        filepath = convert_to_wav(filepath)
+        filename = os.path.basename(filepath)
 
         # Get audio info
         audio_info = preprocessing_service.get_audio_info(filepath)
