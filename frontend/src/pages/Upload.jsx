@@ -44,8 +44,32 @@ const Upload = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Create MediaRecorder
-      const mediaRecorder = new MediaRecorder(stream);
+      // Determine supported MIME type
+      let mimeType = 'audio/webm';
+      let fileExtension = 'webm';
+      
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+        fileExtension = 'webm';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+        fileExtension = 'webm';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        mimeType = 'audio/ogg;codecs=opus';
+        fileExtension = 'ogg';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+        fileExtension = 'mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/mpeg')) {
+        mimeType = 'audio/mpeg';
+        fileExtension = 'mp3';
+      } else {
+        // Fallback to default
+        console.warn('No supported audio MIME type found, using default');
+      }
+
+      // Create MediaRecorder with supported MIME type
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -56,7 +80,10 @@ const Upload = () => {
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        // Store both blob and file extension for later use
+        audioBlob.fileExtension = fileExtension;
+        audioBlob.mimeType = mimeType;
         setRecordedBlob(audioBlob);
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
@@ -123,8 +150,10 @@ const Upload = () => {
     // If in record mode, convert blob to file
     if (mode === 'record' && recordedBlob) {
       const timestamp = Date.now();
-      fileToUpload = new File([recordedBlob], `recording_${timestamp}.webm`, {
-        type: 'audio/webm',
+      const extension = recordedBlob.fileExtension || 'webm';
+      const mimeType = recordedBlob.mimeType || 'audio/webm';
+      fileToUpload = new File([recordedBlob], `recording_${timestamp}.${extension}`, {
+        type: mimeType,
       });
     }
 
@@ -233,12 +262,12 @@ const Upload = () => {
                   id="file-upload"
                   type="file"
                   className="hidden"
-                  accept=".wav,.mp3,.ogg,.flac,.webm"
+                  accept=".wav,.mp3,.ogg,.flac,.webm,.mp4,.m4a"
                   onChange={handleFileSelect}
                 />
               </div>
               <p className="text-sm text-gray-500">
-                Supported formats: WAV, MP3, OGG, FLAC, WebM (Max 16MB)
+                Supported formats: WAV, MP3, OGG, FLAC, WebM, MP4 (Max 16MB)
               </p>
             </div>
 

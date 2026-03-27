@@ -18,7 +18,7 @@ CORS(app)
 
 # Configuration
 UPLOAD_FOLDER = 'data/audio'
-ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'flac', 'webm'}
+ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'flac', 'webm', 'mp4', 'm4a'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
