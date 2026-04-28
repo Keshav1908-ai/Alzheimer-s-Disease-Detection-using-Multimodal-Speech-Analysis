@@ -1,3 +1,73 @@
+# ---------------------------------------------------------------------------
+# Compatibility shim: pkg_resources was removed from Python 3.12+ venvs.
+# librosa, flask-cors, and other packages import various names from it.
+# This shim satisfies all common imports without requiring full setuptools.
+# ---------------------------------------------------------------------------
+import sys
+try:
+    import pkg_resources  # noqa: F401  – already installed, nothing to do
+    # Verify the specific attribute that's commonly missing
+    if not hasattr(pkg_resources, 'resource_filename'):
+        raise ImportError("incomplete pkg_resources")
+except (ModuleNotFoundError, ImportError):
+    import os, types, importlib.metadata as _imeta
+    import importlib.resources as _ires
+
+    _pkg = types.ModuleType("pkg_resources")
+
+    # --- version / distribution helpers ---
+    def _get_distribution(name):
+        try:
+            meta = _imeta.metadata(name)
+            return types.SimpleNamespace(
+                version=meta["Version"] or "0.0.0",
+                metadata=meta,
+            )
+        except _imeta.PackageNotFoundError:
+            raise
+
+    _pkg.get_distribution = _get_distribution
+    _pkg.require = lambda *a, **kw: None
+    _pkg.working_set = []
+    _pkg.DistributionNotFound = _imeta.PackageNotFoundError
+
+    # --- resource helpers (used by librosa and others) ---
+    def _resource_filename(package_or_req, resource_name):
+        """Return a true filesystem path for the resource."""
+        try:
+            pkg = package_or_req if isinstance(package_or_req, str) else package_or_req.__name__
+            mod = sys.modules.get(pkg) or __import__(pkg)
+            base = os.path.dirname(os.path.abspath(mod.__file__))
+            return os.path.join(base, resource_name)
+        except Exception:
+            return resource_name
+
+    def _resource_string(package_or_req, resource_name):
+        path = _resource_filename(package_or_req, resource_name)
+        with open(path, "rb") as f:
+            return f.read()
+
+    def _resource_exists(package_or_req, resource_name):
+        return os.path.exists(_resource_filename(package_or_req, resource_name))
+
+    def _resource_listdir(package_or_req, resource_name):
+        path = _resource_filename(package_or_req, resource_name)
+        return os.listdir(path) if os.path.isdir(path) else []
+
+    _pkg.resource_filename = _resource_filename
+    _pkg.resource_string   = _resource_string
+    _pkg.resource_exists   = _resource_exists
+    _pkg.resource_listdir  = _resource_listdir
+    _pkg.resource_stream   = lambda pkg, name: open(_resource_filename(pkg, name), "rb")
+
+    # --- namespace / entry-point stubs ---
+    _pkg.declare_namespace = lambda *a, **kw: None
+    _pkg.iter_entry_points = lambda *a, **kw: iter([])
+    _pkg.load_entry_point  = lambda *a, **kw: None
+
+    sys.modules["pkg_resources"] = _pkg
+# ---------------------------------------------------------------------------
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
