@@ -4,9 +4,6 @@ const API_BASE_URL = 'http://localhost:5000/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 export const apiService = {
@@ -19,11 +16,11 @@ export const apiService = {
   // Upload audio
   uploadAudio: async (file) => {
     const formData = new FormData();
-    formData.append('audio', file);
+    formData.append('audio', file, file.name);
 
     const response = await api.post('/upload', formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        'Content-Type': undefined,
       },
     });
     return response.data;

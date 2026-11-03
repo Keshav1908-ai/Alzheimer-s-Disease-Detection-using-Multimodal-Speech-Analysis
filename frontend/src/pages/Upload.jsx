@@ -13,6 +13,7 @@ const Upload = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState(null);
+  const [isFinalizingRecording, setIsFinalizingRecording] = useState(false);
   const [recordingMeta, setRecordingMeta] = useState({ ext: 'webm', mime: 'audio/webm' });
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioURL, setAudioURL] = useState(null);
@@ -35,10 +36,27 @@ const Upload = () => {
 
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
-    if (file) {
-      setSelectedFile(file);
-      setError(null);
+    if (!file) return;
+
+    const allowedExtensions = ['wav', 'mp3', 'ogg', 'flac', 'webm', 'mp4', 'm4a'];
+    const extension = file.name.split('.').pop()?.toLowerCase();
+
+    if (!extension || !allowedExtensions.includes(extension)) {
+      setSelectedFile(null);
+      setError(`Unsupported file type "${extension || 'unknown'}". Please select a WAV, MP3, OGG, FLAC, WebM, MP4, or M4A file.`);
+      event.target.value = '';
+      return;
     }
+
+    if (file.size > 16 * 1024 * 1024) {
+      setSelectedFile(null);
+      setError('The audio file exceeds the 16 MB upload limit. Please choose a smaller file.');
+      event.target.value = '';
+      return;
+    }
+
+    setSelectedFile(file);
+    setError(null);
   };
 
   const startRecording = async () => {
@@ -84,6 +102,7 @@ const Upload = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         setRecordedBlob(audioBlob);
         setRecordingMeta({ ext: fileExtension, mime: mimeType });
+        setIsFinalizingRecording(false);
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
 
@@ -126,6 +145,7 @@ const Upload = () => {
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      setIsFinalizingRecording(true);
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       setIsPaused(false);
@@ -136,6 +156,7 @@ const Upload = () => {
   const resetRecording = () => {
     setRecordedBlob(null);
     setRecordingMeta({ ext: 'webm', mime: 'audio/webm' });
+    setIsFinalizingRecording(false);
     setRecordingTime(0);
     if (audioURL) {
       URL.revokeObjectURL(audioURL);
@@ -147,11 +168,22 @@ const Upload = () => {
   const handleUpload = async () => {
     let fileToUpload = selectedFile;
 
-    // If in record mode, convert blob to file
-    if (mode === 'record' && recordedBlob) {
+    // If in record mode, convert the finished recording blob to a file
+    if (mode === 'record') {
+      if (!recordedBlob) {
+        setError('Recording is not ready yet. Please wait for the recording to finish, then try again.');
+        return;
+      }
+      if (recordedBlob.size === 0) {
+        setError('The recording is empty. Please record audio again and stop after speaking.');
+        return;
+      }
+
       const timestamp = Date.now();
-      fileToUpload = new File([recordedBlob], `recording_${timestamp}.${recordingMeta.ext}`, {
-        type: recordingMeta.mime,
+      const mimeType = recordedBlob.type || recordingMeta.mime || 'audio/webm';
+      const extension = recordingMeta.ext || (mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mpeg') ? 'mp3' : 'webm');
+      fileToUpload = new File([recordedBlob], `recording_${timestamp}.${extension}`, {
+        type: mimeType,
       });
     }
 
@@ -173,7 +205,13 @@ const Upload = () => {
         setError(response.error || 'Upload failed');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to upload audio file');
+      if (err.response?.data?.error) {
+        setError(err.response.data.error);
+      } else if (err.code === 'ERR_NETWORK') {
+        setError('Cannot connect to the backend server at http://localhost:5000. Please make sure it is running.');
+      } else {
+        setError(err.message || 'Failed to upload audio file');
+      }
     } finally {
       setUploading(false);
     }
@@ -455,12 +493,14 @@ const Upload = () => {
             disabled={
               (mode === 'upload' && !selectedFile) ||
               (mode === 'record' && !recordedBlob) ||
+              (mode === 'record' && isFinalizingRecording) ||
               uploading ||
               isRecording
             }
             className={`btn-primary flex-1 ${
               (mode === 'upload' && !selectedFile) ||
               (mode === 'record' && !recordedBlob) ||
+              (mode === 'record' && isFinalizingRecording) ||
               uploading ||
               isRecording
                 ? 'opacity-50 cursor-not-allowed'
@@ -475,6 +515,8 @@ const Upload = () => {
                 </svg>
                 Uploading...
               </div>
+            ) : isFinalizingRecording ? (
+              'Finalizing Recording...'
             ) : (
               'Upload & Analyze'
             )}

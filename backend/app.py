@@ -498,6 +498,13 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+@app.errorhandler(413)
+def file_too_large(error):
+    return jsonify({
+        'success': False,
+        'error': 'The audio file exceeds the 16 MB upload limit.'
+    }), 413
+
 if __name__ == '__main__':
     print("Starting Early Alzheimer Detection System API...")
     print("API running on http://localhost:5000")
